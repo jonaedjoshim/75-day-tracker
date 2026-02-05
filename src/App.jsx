@@ -1,35 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { db } from './firebase';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs,
+  onSnapshot,
+  updateDoc,
+  deleteDoc 
+} from 'firebase/firestore';
 
-// Firebase Schema (Add to your Firebase project)
-/*
-Firestore Structure:
-- Collection: "users/{userId}/dailyLogs"
-  - Document: "day_{dayNumber}" (e.g., "day_1", "day_2")
-    {
-      date: timestamp,
-      tasks: {
-        workout1: boolean,
-        workout2: boolean,
-        diet: boolean,
-        water: boolean,
-        reading: boolean,
-        progress_pic: boolean
-      },
-      completionRate: number,
-      notes: string
-    }
-
-- Collection: "users/{userId}/stats"
-  - Document: "overall"
-    {
-      currentDay: number,
-      totalDays: 75,
-      streak: number,
-      overallCompletion: number,
-      lastUpdated: timestamp
-    }
-*/
+// Firebase Firestore Structure:
+// Collection: "tracker"
+//   - Document: "tasks" → { tasks: [...] }
+//   - Document: "currentDay" → { day: number }
+//   - Document: "dayHistory" → { day_1: {...}, day_2: {...}, ... }
+//   - Document: "completedDays" → { days: [1, 3, 5, ...] }
 
 const App = () => {
   const TOTAL_DAYS = 75;
@@ -54,6 +42,82 @@ const App = () => {
   const [newTaskIcon, setNewTaskIcon] = useState('⭐');
   const [editingTask, setEditingTask] = useState(null);
   const [dayHistory, setDayHistory] = useState({}); // Store completion status for each day
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load data from Firebase on mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // Load tasks
+        const tasksDoc = await getDoc(doc(db, 'tracker', 'tasks'));
+        if (tasksDoc.exists()) {
+          const loadedTasks = tasksDoc.data().tasks;
+          setTasks(loadedTasks);
+          setDailyTasks(loadedTasks.reduce((acc, task) => ({ ...acc, [task.id]: false }), {}));
+        }
+
+        // Load current day
+        const currentDayDoc = await getDoc(doc(db, 'tracker', 'currentDay'));
+        if (currentDayDoc.exists()) {
+          setCurrentDay(currentDayDoc.data().day);
+        }
+
+        // Load day history
+        const dayHistoryDoc = await getDoc(doc(db, 'tracker', 'dayHistory'));
+        if (dayHistoryDoc.exists()) {
+          const history = dayHistoryDoc.data();
+          setDayHistory(history);
+          
+          // Load current day's tasks
+          const currentDayKey = `day_${currentDayDoc.exists() ? currentDayDoc.data().day : 1}`;
+          if (history[currentDayKey]) {
+            setDailyTasks(history[currentDayKey]);
+          }
+        }
+
+        // Load completed days
+        const completedDaysDoc = await getDoc(doc(db, 'tracker', 'completedDays'));
+        if (completedDaysDoc.exists()) {
+          setCompletedDays(new Set(completedDaysDoc.data().days || []));
+        }
+
+        setIsLoading(false);
+      } catch (error) {
+        console.error("Error loading data:", error);
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  // Save tasks to Firebase whenever they change
+  useEffect(() => {
+    if (!isLoading && tasks.length > 0) {
+      setDoc(doc(db, 'tracker', 'tasks'), { tasks });
+    }
+  }, [tasks, isLoading]);
+
+  // Save current day to Firebase
+  useEffect(() => {
+    if (!isLoading) {
+      setDoc(doc(db, 'tracker', 'currentDay'), { day: currentDay });
+    }
+  }, [currentDay, isLoading]);
+
+  // Save day history to Firebase
+  useEffect(() => {
+    if (!isLoading && Object.keys(dayHistory).length > 0) {
+      setDoc(doc(db, 'tracker', 'dayHistory'), dayHistory);
+    }
+  }, [dayHistory, isLoading]);
+
+  // Save completed days to Firebase
+  useEffect(() => {
+    if (!isLoading) {
+      setDoc(doc(db, 'tracker', 'completedDays'), { days: Array.from(completedDays) });
+    }
+  }, [completedDays, isLoading]);
 
   // Calculate stats
   const todaysCompletion = tasks.length > 0 ? (Object.values(dailyTasks).filter(Boolean).length / tasks.length) * 100 : 0;
@@ -173,6 +237,23 @@ ${todaysCompletion === 100 ? '💎 FLAWLESS EXECUTION. NO EXCUSES.' : '⚡ Keep 
   };
 
   const commonEmojis = ['💪', '🏋️', '🥗', '💧', '📖', '📸', '🏃', '🧘', '😴', '🎯', '🔥', '⭐', '✨', '🎵', '📝', '💼', '🎨', '🧠'];
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-900 text-white flex items-center justify-center">
+        <div className="text-center">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            className="text-6xl mb-4"
+          >
+            ⏳
+          </motion.div>
+          <h2 className="text-2xl font-bold">Loading your progress...</h2>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-900 text-white p-4 md:p-8">
